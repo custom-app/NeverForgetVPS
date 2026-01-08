@@ -15,9 +15,17 @@ const (
 	DefaultCheckInterval = 12 * time.Hour
 )
 
-// VPSMonitor represents the main monitor for VPS providers
+// VPSMonitor defines the interface for VPS monitoring
+type VPSMonitor interface {
+	// Start starts VPS monitoring
+	Start() error
+	// Stop stops the monitoring goroutine
+	Stop()
+}
+
+// vpsMonitor represents the main monitor for VPS providers
 // T is the type of messages sent to the channel
-type VPSMonitor[T any] struct {
+type vpsMonitor[T any] struct {
 	// Providers are optional - if nil, they are not configured
 	Vdsina      provider.Provider
 	OneProvider provider.Provider
@@ -43,8 +51,9 @@ type Config struct {
 // messageChan is required - panic if nil
 // messageConverter is a function that converts text string to message type T
 // T is the type of messages (e.g., domain.MessageToSend, string, etc.)
-func NewVPSMonitor[T any](ctx context.Context, config Config, messageChan chan T, messageConverter func(string) T) *VPSMonitor[T] {
-	m := &VPSMonitor[T]{}
+// Returns VPSMonitor interface instead of concrete type
+func NewVPSMonitor[T any](ctx context.Context, config Config, messageChan chan T, messageConverter func(string) T) VPSMonitor {
+	m := &vpsMonitor[T]{}
 
 	if messageChan == nil {
 		panic("messageChan is required")
@@ -84,8 +93,23 @@ func NewVPSMonitor[T any](ctx context.Context, config Config, messageChan chan T
 	return m
 }
 
+// Start starts VPS monitoring
+// Starts a goroutine for periodic payment date checking
+func (m *vpsMonitor[T]) Start() error {
+	// Start periodic checking goroutine
+	go m.runPaymentDateCheck(m.checkInterval)
+	return nil
+}
+
+// Stop stops the monitoring goroutine
+func (m *vpsMonitor[T]) Stop() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+}
+
 // runPaymentDateCheck runs periodic checks of provider payment dates
-func (m *VPSMonitor[T]) runPaymentDateCheck(interval time.Duration) {
+func (m *vpsMonitor[T]) runPaymentDateCheck(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -104,7 +128,7 @@ func (m *VPSMonitor[T]) runPaymentDateCheck(interval time.Duration) {
 }
 
 // checkPaymentDates checks payment dates for all configured providers
-func (m *VPSMonitor[T]) checkPaymentDates() {
+func (m *vpsMonitor[T]) checkPaymentDates() {
 	providers := []provider.Provider{}
 	timeouts := []time.Duration{}
 	if m.Vdsina != nil && m.Vdsina.IsConfigured() {
@@ -140,25 +164,8 @@ func (m *VPSMonitor[T]) checkPaymentDates() {
 	}
 }
 
-// sendMessage sends a message to the channel using the converter function
-func (m *VPSMonitor[T]) sendMessage(text string) {
-	if m.messageChan == nil || m.messageConverter == nil {
-		return
-	}
-
-	// Convert text to message type T using the converter function
-	msg := m.messageConverter(text)
-
-	// Send the message to channel
-	select {
-	case m.messageChan <- msg:
-	default:
-		// Channel is full, skip sending
-	}
-}
-
 // formatPaymentMessage formats a payment notification message based on days until payment
-func (m *VPSMonitor[T]) formatPaymentMessage(providerName string, paymentDate time.Time) string {
+func (m *vpsMonitor[T]) formatPaymentMessage(providerName string, paymentDate time.Time) string {
 	now := time.Now().UTC()
 	daysUntil := int(paymentDate.Sub(now).Hours() / 24)
 
@@ -180,17 +187,15 @@ func (m *VPSMonitor[T]) formatPaymentMessage(providerName string, paymentDate ti
 	}
 }
 
-// Stop stops the monitoring goroutine
-func (m *VPSMonitor[T]) Stop() {
-	if m.cancel != nil {
-		m.cancel()
+// sendMessage sends a message to the channel using the converter function
+func (m *vpsMonitor[T]) sendMessage(text string) {
+	if m.messageChan == nil || m.messageConverter == nil {
+		return
 	}
-}
 
-// Start starts VPS monitoring
-// Starts a goroutine for periodic payment date checking
-func (m *VPSMonitor[T]) Start() error {
-	// Start periodic checking goroutine
-	go m.runPaymentDateCheck(m.checkInterval)
-	return nil
+	// Convert text to message type T using the converter function
+	msg := m.messageConverter(text)
+
+	// Send the message to channel
+	m.messageChan <- msg
 }
