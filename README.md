@@ -1,6 +1,20 @@
 # NeverForgetVPS
 
+![Version](https://img.shields.io/github/v/tag/custom-app/NeverForgetVPS?label=version)
+
 Library for monitoring VPS provider payment dates and sending notifications.
+
+## Installation
+
+```bash
+go get github.com/custom-app/NeverForgetVPS@latest
+```
+
+Or specify a version:
+
+```bash
+go get github.com/custom-app/NeverForgetVPS@v1.0.0
+```
 
 ## Environment Variables
 
